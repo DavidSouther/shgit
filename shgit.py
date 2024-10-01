@@ -9,17 +9,19 @@ def make_long_flags(flags: dict[str, str]) -> list[str]:
 
 class Sh:
     def __init__(self,
-                 prefix: Optional[str | list[str]] = None,
+                 args: Optional[str | list[str]] = None,
                  check=True,
+                 capture_output=False,
                  cwd: str | bytes | Path = Path("."),
                  log=False):
-        if prefix is None:
-            self.prefix = []
-        elif isinstance(prefix, str):
-            self.prefix = [prefix]
+        if args is None:
+            self.args = []
+        elif isinstance(args, str):
+            self.args = [args]
         else:
-            self.prefix = prefix
+            self.args = args
         self.check = check
+        self.capture_output = capture_output
         self.cwd: str | bytes | Path = cwd
         self.log = log
 
@@ -31,8 +33,9 @@ class Sh:
                  **kwargs: str):
         check = check or self.check
         cwd = cwd or self.cwd
+        capture_output = capture_output or self.capture_output
         long_args = make_long_flags(kwargs)
-        cmd: list[str] = [*self.prefix, *args, *long_args]
+        cmd: list[str] = [*self.args, *args, *long_args]
         if self.log:
             print(cmd)
         return run(cmd,
@@ -41,8 +44,14 @@ class Sh:
                    shell=False,
                    cwd=cwd)
 
-    def __getattr__(self, name: str):
-        return Sh([*self.prefix, name], self.check, self.cwd, self.log)
+    def __getattr__(self, arg: str):
+        return Sh(
+            [*self.args, arg],
+            self.check,
+            self.capture_output,
+            self.cwd,
+            self.log
+            )
 
 
 sh = Sh()
