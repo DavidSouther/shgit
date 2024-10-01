@@ -17,4 +17,5 @@ if __name__ == "__main__":
     # git.remote('-v')
     # git.remote.add.origin("git@github.com:DavidSouther/shgit.git")
     # git.push("-u", "origin", "main")
+    git.update('--push')
     git.push()
