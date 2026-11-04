@@ -1,5 +1,5 @@
 from pathlib import Path
-from subprocess import CalledProcessError, CompletedProcess
+from subprocess import CalledProcessError, CompletedProcess, TimeoutExpired
 import sys
 from typing import Union
 
@@ -199,3 +199,67 @@ def test_check_returncode_custom_logger_and_success():
 def test_generic_presets():
     assert sh.args == []
     assert git.args == ["git"]
+
+
+SLEEP = "import time; time.sleep(5)"
+
+
+def test_timeout_raises_for_slow_command():
+    run = Sh(sys.executable, timeout=0.2)("-c", SLEEP)
+    with pytest.raises(TimeoutExpired):
+        _ = run.returncode
+
+
+def test_call_timeout_overrides_instance_timeout():
+    slow = Sh(sys.executable, timeout=30)("-c", SLEEP, timeout=0.2)
+    with pytest.raises(TimeoutExpired):
+        _ = slow.returncode
+    fast = Sh(sys.executable, timeout=0.2)("-c", "pass", timeout=30)
+    assert fast.returncode == 0
+
+
+def test_timeout_passes_through_attribute_and_bracket_access():
+    shell = Sh("tool", timeout=3).remote["show-all"]
+    assert shell.timeout == 3
+    assert shell().timeout == 3
+
+
+def test_runner_only_receives_timeout_when_set():
+    calls = []
+
+    def runner(args, capture_output, check, cwd, input, **options):
+        calls.append(options)
+        return CompletedProcess(args, 0, stdout="", stderr="")
+
+    Sh("tool", runner=runner)().returncode
+    Sh("tool", runner=runner, timeout=4)().returncode
+    Sh("tool", runner=runner)(timeout=5).returncode
+    assert calls == [{}, {"timeout": 4}, {"timeout": 5}]
+
+
+def test_clone_timeout():
+    original = Sh("tool", timeout=3)
+    assert clone(original).timeout == 3
+    assert clone(original, timeout=9).timeout == 9
+    assert original.timeout == 3
+
+
+@pytest.mark.parametrize("runner", [TrueRunner, FalseRunner, with_exit_code(2), make_runner(echo)])
+def test_builtin_runners_accept_timeout(runner):
+    assert Sh(runner=runner, check=False, timeout=1)().returncode in (0, 1, 2)
+
+
+def test_check_returncode_logs_timeout_without_rerunning():
+    calls = []
+
+    def runner(args, capture_output, check, cwd, input, timeout=None):
+        calls.append(args)
+        raise TimeoutExpired(args, timeout)
+
+    run = Sh("tool", runner=runner, timeout=1)("arg")
+    with capture_logs() as events:
+        with pytest.raises(TimeoutExpired):
+            run.check_returncode()
+    assert len(calls) == 1
+    assert events[0]["stdout"] is None
+    assert events[0]["stderr"] is None

@@ -29,13 +29,14 @@ assert result.stdout == "world\n"
 * `capture_output`: whether to capture stdout and stderr; defaults to `True`. When disabled, output goes to the parent process and the result's stdout and stderr are `None`. The call-level value is combined with the instance setting using `or`, so disable capture on the instance when needed.
 * `cwd`: the working directory, as a `str`, `bytes`, or `Path`; defaults to `Path(".")`. Calls can override it.
 * `log`: when `True`, logs the shell-quoted command through structlog when the `Run` is created; defaults to `False`.
+* `timeout`: seconds a command may run before `subprocess.TimeoutExpired` is raised, or `None` for no limit; defaults to `None`. A call's `timeout=` overrides it. A command that times out is not cached, so reading the `Run` again runs it again. `check_returncode` logs a timeout like any other failure.
 * `runner`: the callable that executes the command; defaults to `subprocess_runner`. Attribute and bracket access preserve it and the other settings.
 
 `Run.command` contains the shell-quoted command for display. Commands execute without a shell. `Run.check_returncode(event=None, logger=..., reraise=True)` executes with automatic checking disabled, checks the result, and logs a warning with the command, working directory, stdout, and stderr on failure. It raises by default; use `reraise=False` to log without raising. It returns the `Run`, and accepts a custom structlog-compatible logger and event message.
 
 ## Cloning and test runners
 
-Use `clone(shell, check=..., capture_output=..., cwd=..., log=..., runner=...)` to create another wrapper with the same arguments and selected settings replaced:
+Use `clone(shell, check=..., capture_output=..., cwd=..., log=..., runner=..., timeout=...)` to create another wrapper with the same arguments and selected settings replaced:
 
 ```python
 from shgit import clone, git
@@ -43,9 +44,9 @@ from shgit import clone, git
 other_checkout = clone(git, cwd="/path/to/checkout")
 ```
 
-Clone settings use `override or original`: a false value does not replace a true setting. Construct a new `Sh` when you need to disable such a setting.
+Clone settings use `override or original`: a false value does not replace a true setting. Construct a new `Sh` when you need to disable such a setting. `timeout` is the exception: any value other than `None` replaces the original, though `None` cannot clear it.
 
-Inject a `Runnable` to execute without launching subprocesses. It receives `args`, `capture_output`, `check`, `cwd`, and `input`, and returns a `subprocess.CompletedProcess`. `make_runner` adapts a `RunnableCallback` that accepts `(args, cwd, input)` and returns `RunnableCallbackCompleted(returncode, stdout, stderr)`; the adapter handles capture and return-code checking.
+Inject a `Runnable` to execute without launching subprocesses. It receives `args`, `capture_output`, `check`, `cwd`, and `input`, plus `timeout` when one is set, and returns a `subprocess.CompletedProcess`. A runner that never receives a timeout need not accept the parameter; the built-in fake runners accept it and ignore it. `make_runner` adapts a `RunnableCallback` that accepts `(args, cwd, input)` and returns `RunnableCallbackCompleted(returncode, stdout, stderr)`; the adapter handles capture and return-code checking.
 
 ```python
 from shgit import RunnableCallbackCompleted, Sh, make_runner
