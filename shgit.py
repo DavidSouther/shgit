@@ -2,15 +2,44 @@ from dataclasses import dataclass
 from pathlib import Path
 from shlex import quote
 from subprocess import CompletedProcess, run
-from typing import Callable, Optional, Protocol, Union
+from typing import Any, Callable, Mapping, Optional, Protocol, Union
 
 from structlog.stdlib import BoundLogger, get_logger
 
 logger = get_logger(__name__)
 
 
-def make_long_flags(flags: dict[str, str]) -> list[str]:
-    return [f"--{key}={val}" for key, val in flags.items()]
+def render_flag(key: str, value: Any) -> list[str]:
+    """Render one option the way most CLIs accept it.
+
+    `None` and `False` omit the option; `True` is a bare switch. A list repeats the
+    option, and a mapping repeats it as `KEY=VALUE` (docker's `--env`, `--label`).
+    A one-letter key is a short option with its value as a separate argument; a longer
+    key is `--key=value`, with `_` written as `-`.
+    """
+    if value is None or value is False:
+        return []
+    short = len(key) == 1
+    flag = f"-{key}" if short else f"--{key.replace('_', '-')}"
+    if value is True:
+        return [flag]
+    if isinstance(value, Mapping):
+        values = [f"{name}={val}" for name, val in value.items()]
+    elif isinstance(value, (list, tuple)):
+        values = [str(val) for val in value]
+    else:
+        values = [str(value)]
+    rendered: list[str] = []
+    for val in values:
+        rendered += [flag, val] if short else [f"{flag}={val}"]
+    return rendered
+
+
+def make_flags(flags: Mapping[str, Any]) -> list[str]:
+    return [arg for key, value in flags.items() for arg in render_flag(key, value)]
+
+
+make_long_flags = make_flags
 
 
 class Runnable(Protocol):
@@ -146,7 +175,8 @@ class Sh:
         check=None,
         cwd: Union[str, bytes, Path, None] = None,
         timeout: Optional[float] = None,
-        **kwargs: str,
+        input: Optional[str] = None,
+        **kwargs: Any,
     ):
         if check is None:
             check = self.check
@@ -154,16 +184,16 @@ class Sh:
             timeout = self.timeout
         cwd = cwd or self.cwd
         capture_output = capture_output or self.capture_output
-        long_args = make_long_flags(kwargs)
-        cmd: list[str] = [*self.args, *args, *long_args]
+        cmd: list[str] = [*self.args, *args, *make_flags(kwargs)]
         run = Run(cmd, check, cwd, capture_output, self.runner, timeout)
+        run.pipe = input
         if self.log:
             logger.info(run.command)
         return run
 
-    def __getattr__(self, arg: str):
+    def _with(self, *args: str) -> "Sh":
         return Sh(
-            [*self.args, arg],
+            [*self.args, *args],
             self.check,
             self.capture_output,
             self.cwd,
@@ -172,16 +202,14 @@ class Sh:
             self.timeout,
         )
 
-    def __getitem__(self, arg: str):
-        return Sh(
-            [*self.args, arg],
-            self.check,
-            self.capture_output,
-            self.cwd,
-            self.log,
-            self.runner,
-            self.timeout,
-        )
+    def __getattr__(self, arg: str):
+        return self._with(arg)
+
+    def __getitem__(self, arg: Union[str, Mapping[str, Any]]):
+        """Append a name, or a mapping of options, at this position in the command."""
+        if isinstance(arg, Mapping):
+            return self._with(*make_flags(arg))
+        return self._with(arg)
 
 
 def clone(

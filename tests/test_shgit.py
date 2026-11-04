@@ -13,6 +13,7 @@ from shgit import (
     TrueRunner,
     clone,
     git,
+    make_flags,
     make_runner,
     sh,
     simple_runner_wrapper,
@@ -263,3 +264,53 @@ def test_check_returncode_logs_timeout_without_rerunning():
     assert len(calls) == 1
     assert events[0]["stdout"] is None
     assert events[0]["stderr"] is None
+
+
+@pytest.mark.parametrize(
+    "flags, rendered",
+    [
+        ({"name": "x"}, ["--name=x"]),
+        ({"detach": True}, ["--detach"]),
+        ({"detach": False, "network": None}, []),
+        ({"dry_run": True}, ["--dry-run"]),
+        ({"v": True}, ["-v"]),
+        ({"m": "a message"}, ["-m", "a message"]),
+        ({"label": ["a=1", "b=2"]}, ["--label=a=1", "--label=b=2"]),
+        ({"env": {"A": "1", "B": 2}}, ["--env=A=1", "--env=B=2"]),
+        ({"e": {"A": "1"}}, ["-e", "A=1"]),
+        ({"port": 5432}, ["--port=5432"]),
+    ],
+)
+def test_render_flags(flags, rendered):
+    assert make_flags(flags) == rendered
+
+
+def test_bracket_mapping_places_options_at_that_position():
+    docker = Sh("docker", runner=TrueRunner)
+    run = docker.run[{"detach": True, "name": "db"}]("postgres:16", "--", "-c", "fsync=off")
+    assert run.args == ["docker", "run", "--detach", "--name=db", "postgres:16", "--", "-c", "fsync=off"]
+    run = Sh("git", runner=TrueRunner)[{"C": "/repo"}].commit[{"m": "msg", "amend": True}]()
+    assert run.args == ["git", "-C", "/repo", "commit", "-m", "msg", "--amend"]
+
+
+def test_bracket_mapping_returns_a_shell_not_a_run():
+    segment = Sh("aws", runner=TrueRunner).s3.cp[{"region": "us-east-1"}]
+    assert isinstance(segment, Sh)
+    assert segment.args == ["aws", "s3", "cp", "--region=us-east-1"]
+
+
+def test_keyword_flags_follow_positionals_and_use_the_same_rendering():
+    run = Sh("tool", runner=TrueRunner)("arg", dry_run=True, tag=["a", "b"])
+    assert run.args == ["tool", "arg", "--dry-run", "--tag=a", "--tag=b"]
+
+
+def test_input_feeds_stdin():
+    assert Sh("cat")(input="from stdin\n")() == "from stdin\n"
+    seen = []
+
+    def cat_callback(args, cwd, input):
+        seen.append(input)
+        return RunnableCallbackCompleted(0, input, "")
+
+    Sh("cat", runner=make_runner(cat_callback))(input="x")()
+    assert seen == ["x"]
