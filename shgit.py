@@ -21,6 +21,7 @@ class Runnable(Protocol):
         check: bool,
         cwd: Path,
         input: Optional[str],
+        timeout: Optional[float] = None,
     ) -> CompletedProcess[str]:
         pass
 
@@ -31,6 +32,7 @@ def subprocess_runner(
     check: bool,
     cwd: Path,
     input: Optional[str],
+    timeout: Optional[float] = None,
 ) -> CompletedProcess[str]:
     return run(
         args,
@@ -38,6 +40,7 @@ def subprocess_runner(
         check=check,
         cwd=cwd,
         input=input,
+        timeout=timeout,
         shell=False,
         encoding="utf-8",
     )
@@ -64,6 +67,7 @@ def make_runner(cb: RunnableCallback) -> Runnable:
         check: bool,
         cwd: Path,
         input: Optional[str],
+        timeout: Optional[float] = None,
     ) -> CompletedProcess:
         output = cb(args, cwd, input)
         if capture_output:
@@ -86,6 +90,7 @@ def with_exit_code(code: int) -> Runnable:
         check: bool,
         cwd: Path,
         input: Optional[str],
+        timeout: Optional[float] = None,
     ) -> CompletedProcess:
         return CompletedProcess(args, returncode=code)
 
@@ -99,6 +104,7 @@ def simple_runner_wrapper(cb: Callable[[list[str]], CompletedProcess[str]]) -> R
         check: bool,
         cwd: Path,
         input: Optional[str],
+        timeout: Optional[float] = None,
     ) -> CompletedProcess:
         return cb(args)
 
@@ -118,6 +124,7 @@ class Sh:
         cwd: Union[str, bytes, Path] = Path("."),
         log=False,
         runner: Runnable = subprocess_runner,
+        timeout: Optional[float] = None,
     ):
         if args is None:
             self.args = []
@@ -130,6 +137,7 @@ class Sh:
         self.cwd: Union[str, bytes, Path] = cwd
         self.log = log
         self.runner = runner
+        self.timeout = timeout
 
     def __call__(
         self,
@@ -137,27 +145,42 @@ class Sh:
         capture_output=False,
         check=None,
         cwd: Union[str, bytes, Path, None] = None,
+        timeout: Optional[float] = None,
         **kwargs: str,
     ):
         if check is None:
             check = self.check
+        if timeout is None:
+            timeout = self.timeout
         cwd = cwd or self.cwd
         capture_output = capture_output or self.capture_output
         long_args = make_long_flags(kwargs)
         cmd: list[str] = [*self.args, *args, *long_args]
-        run = Run(cmd, check, cwd, capture_output, self.runner)
+        run = Run(cmd, check, cwd, capture_output, self.runner, timeout)
         if self.log:
             logger.info(run.command)
         return run
 
     def __getattr__(self, arg: str):
         return Sh(
-            [*self.args, arg], self.check, self.capture_output, self.cwd, self.log, self.runner
+            [*self.args, arg],
+            self.check,
+            self.capture_output,
+            self.cwd,
+            self.log,
+            self.runner,
+            self.timeout,
         )
 
     def __getitem__(self, arg: str):
         return Sh(
-            [*self.args, arg], self.check, self.capture_output, self.cwd, self.log, self.runner
+            [*self.args, arg],
+            self.check,
+            self.capture_output,
+            self.cwd,
+            self.log,
+            self.runner,
+            self.timeout,
         )
 
 
@@ -168,6 +191,7 @@ def clone(
     cwd: Optional[Union[str, bytes, Path]] = None,
     log: Optional[bool] = None,
     runner: Optional[Runnable] = None,
+    timeout: Optional[float] = None,
 ) -> Sh:
     return Sh(
         sh.args,
@@ -176,11 +200,20 @@ def clone(
         cwd=cwd or sh.cwd,
         log=log or sh.log,
         runner=runner or sh.runner,
+        timeout=sh.timeout if timeout is None else timeout,
     )
 
 
 class Run:
-    def __init__(self, args, check, cwd, capture_output, runner: Runnable):
+    def __init__(
+        self,
+        args,
+        check,
+        cwd,
+        capture_output,
+        runner: Runnable,
+        timeout: Optional[float] = None,
+    ):
         self.args = args
         self.check = check
         self.cwd = cwd
@@ -188,6 +221,7 @@ class Run:
         self.pipe: Optional[str] = None
         self.completed: Optional[CompletedProcess[str]] = None
         self.runner: Runnable = runner
+        self.timeout = timeout
         self.command = " ".join(quote(arg) for arg in args)
 
     @property
@@ -219,8 +253,8 @@ class Run:
                 event or "Command returned failure",
                 cwd=self.cwd,
                 command=self.command,
-                stdout=self.stdout,
-                stderr=self.stderr,
+                stdout=self.completed.stdout if self.completed else None,
+                stderr=self.completed.stderr if self.completed else None,
             )
             if reraise:
                 raise e
@@ -228,12 +262,15 @@ class Run:
 
     def _run(self) -> CompletedProcess[str]:
         if self.completed is None:
+            # Only pass a timeout when one is set, so runners that predate it keep working.
+            options = {} if self.timeout is None else {"timeout": self.timeout}
             self.completed = self.runner(
                 self.args,
                 capture_output=self.capture_output,
                 check=self.check,
                 cwd=self.cwd,
                 input=self.pipe,
+                **options,
             )
         return self.completed
 
