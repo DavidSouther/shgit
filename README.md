@@ -13,6 +13,33 @@ pick = git["cherry-pick"]("abc123", check=False)
 code = pick.returncode
 ```
 
+## Placing options
+
+A command is built from segments. Attribute and bracket access add to the command and return another `Sh`; only the final call returns a `Run`. Positional arguments are passed through unchanged. A mapping in brackets adds options at that position, which matters for tools that take some options before the subcommand, some after it, and some after `--` for the program they launch:
+
+```python
+docker = Sh("docker")
+docker.run[{"detach": True, "name": "db", "env": {"POSTGRES_HOST_AUTH_METHOD": "trust"}}](
+    "postgres:16", "--", "-c", "fsync=off"
+)
+# docker run --detach --name=db --env=POSTGRES_HOST_AUTH_METHOD=trust postgres:16 -- -c fsync=off
+git[{"C": "/repo"}].commit[{"m": "message"}]()
+# git -C /repo commit -m message
+```
+
+Options render as follows:
+
+| Value | Rendered |
+| --- | --- |
+| `"x"`, `5432` | `--key=x`, `--key=5432` |
+| `True` | `--key` |
+| `False`, `None` | omitted |
+| `["a", "b"]` | `--key=a --key=b` |
+| `{"A": "1"}` | `--key=A=1` |
+| one-letter key | `-k value` (`-k` alone for `True`) |
+
+`_` in a key is written as `-`; use a mapping literal for any other spelling. Keyword arguments to a call use the same rendering, placed after the positional arguments, so use them only for options that belong at the end. `input=` passes text to the command's stdin.
+
 Calls return a lazy `Run`. Reading `stdout`, `stderr`, or `returncode`, or calling the result, executes the command once and caches its result. Calling a `Run` returns its stdout. Use `|` to pass one command's captured stdout to the next command's stdin:
 
 ```python
