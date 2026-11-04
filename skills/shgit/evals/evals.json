@@ -1,0 +1,59 @@
+{
+  "skill_name": "shgit",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Using the shgit library, write a Python function that starts a throwaway postgres:16 container named after a uuid with no network and TZ=UTC, waits until pg_isready succeeds (polling for up to 45 seconds), and raises a DeployError with the docker error text if the container cannot start.",
+      "expected_output": "One module-level Sh('docker'). Options before the image are placed with a bracket mapping (detach, rm, network, name, env mapping), not keyword arguments in the final call. The readiness probe uses check=False and reads returncode. The start failure is caught as CalledProcessError at that call and re-raised as DeployError from the error. No execute()/run() wrapper function.",
+      "expectations": [
+        "Defines no helper that executes or wraps every shgit call",
+        "Places --detach/--network/--name/--env before the image through a bracket mapping or positional strings",
+        "Uses check=False with returncode for the pg_isready poll",
+        "Catches CalledProcessError where the container is started and raises DeployError from it",
+        "Does not import subprocess to run commands"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Review this code and rewrite it idiomatically with shgit:\n\n```python\nfrom shgit import Sh\n\ndocker = Sh('docker')\n\ndef run(cmd, input=None):\n    try:\n        r = cmd\n        r.pipe = input\n        r.returncode\n    except Exception as e:\n        raise RuntimeError(str(e))\n    return r\n\nrun(docker.exec('db', 'psql', '-c', 'select 1'))\nrun(docker.logs('--tail', '20', 'db'))\nprint(git.log('--oneline').stdout)\n```",
+      "expected_output": "Removes the run() wrapper; uses input= on the call; translates failure at each call site; replaces git.log with git['log'] and defines git = Sh('git').",
+      "expectations": [
+        "Removes the run() wrapper",
+        "Passes stdin with input= and not by assigning .pipe",
+        "Points out that git.log is a setting (False), not a subcommand, and uses git['log']",
+        "Handles each failure at the call that knows what failed, not through a shared catch-all"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "With shgit, run `git -C /srv/app commit -m 'release' --amend` and then `aws s3 cp build.zip s3://bucket/ --region us-east-1 --acl private`, giving the aws call a 60 second limit.",
+      "expected_output": "git[{'C': '/srv/app'}].commit[{'m': 'release', 'amend': True}]() and aws.s3.cp(...) with timeout=60; options in the order the tools require.",
+      "expectations": [
+        "Puts -C before the commit subcommand using a bracket mapping",
+        "Renders -m as a short option and --amend as a bare switch (True), not --amend=True",
+        "Sets timeout=60 on the aws call or a clone",
+        "Does not build argument lists by string formatting"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Write a pytest test for a function deploy(shell) that calls shell.deploy['--env=prod']('v1') and must raise DeployError when the tool exits with status 3. Use shgit's test facilities.",
+      "expected_output": "Uses make_runner with a callback returning a nonzero code (so check raises CalledProcessError), not FalseRunner; asserts on the arguments seen.",
+      "expectations": [
+        "Uses make_runner and not TrueRunner/FalseRunner/with_exit_code to produce the failure",
+        "Asserts on the arguments the callback received",
+        "Does not mock.patch subprocess.run"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "I need to run `make build` in three different checkouts with a 10 minute limit each, streaming output to the terminal, and fail with a BuildError naming the checkout.",
+      "expected_output": "A single Sh('make', capture_output=False, timeout=600) or clone per checkout with cwd; failure translated per checkout.",
+      "expectations": [
+        "Builds capture_output=False on the instance, not as a call argument",
+        "Uses clone(..., cwd=...) or a cwd per call without a wrapper function",
+        "Catches CalledProcessError (and TimeoutExpired) naming the checkout in BuildError"
+      ]
+    }
+  ]
+}
