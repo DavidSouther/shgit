@@ -8,6 +8,8 @@ from structlog.stdlib import BoundLogger, get_logger
 
 logger = get_logger(__name__)
 
+PathLike = Union[str, bytes, Path]
+
 
 def render_flag(key: str, value: Any) -> list[str]:
     """Render one option the way most CLIs accept it.
@@ -48,18 +50,18 @@ class Runnable(Protocol):
         args: list[str],
         capture_output: bool,
         check: bool,
-        cwd: Path,
+        cwd: PathLike,
         input: Optional[str],
         timeout: Optional[float] = None,
     ) -> CompletedProcess[str]:
-        pass
+        ...
 
 
 def subprocess_runner(
     args: list[str],
     capture_output: bool,
     check: bool,
-    cwd: Path,
+    cwd: PathLike,
     input: Optional[str],
     timeout: Optional[float] = None,
 ) -> CompletedProcess[str]:
@@ -84,9 +86,9 @@ class RunnableCallbackCompleted:
 
 class RunnableCallback(Protocol):
     def __call__(
-        self, args: list[str], cwd: Path, input: Optional[str]
+        self, args: list[str], cwd: PathLike, input: Optional[str]
     ) -> RunnableCallbackCompleted:
-        pass
+        ...
 
 
 def make_runner(cb: RunnableCallback) -> Runnable:
@@ -94,10 +96,10 @@ def make_runner(cb: RunnableCallback) -> Runnable:
         args: list[str],
         capture_output: bool,
         check: bool,
-        cwd: Path,
+        cwd: PathLike,
         input: Optional[str],
         timeout: Optional[float] = None,
-    ) -> CompletedProcess:
+    ) -> CompletedProcess[str]:
         output = cb(args, cwd, input)
         if capture_output:
             completed = CompletedProcess(
@@ -117,10 +119,10 @@ def with_exit_code(code: int) -> Runnable:
         args: list[str],
         capture_output: bool,
         check: bool,
-        cwd: Path,
+        cwd: PathLike,
         input: Optional[str],
         timeout: Optional[float] = None,
-    ) -> CompletedProcess:
+    ) -> CompletedProcess[str]:
         return CompletedProcess(args, returncode=code)
 
     return runner
@@ -131,10 +133,10 @@ def simple_runner_wrapper(cb: Callable[[list[str]], CompletedProcess[str]]) -> R
         args: list[str],
         capture_output: bool,
         check: bool,
-        cwd: Path,
+        cwd: PathLike,
         input: Optional[str],
         timeout: Optional[float] = None,
-    ) -> CompletedProcess:
+    ) -> CompletedProcess[str]:
         return cb(args)
 
     return runner
@@ -148,36 +150,37 @@ class Sh:
     def __init__(
         self,
         args: Union[str, list[str], None] = None,
-        check=True,
-        capture_output=True,
-        cwd: Union[str, bytes, Path] = Path("."),
-        log=False,
+        check: bool = True,
+        capture_output: bool = True,
+        cwd: PathLike = Path("."),
+        log: bool = False,
         runner: Runnable = subprocess_runner,
         timeout: Optional[float] = None,
-    ):
+    ) -> None:
+        self.args: list[str]
         if args is None:
             self.args = []
         elif isinstance(args, str):
             self.args = [args]
         else:
             self.args = args
-        self.check = check
-        self.capture_output = capture_output
-        self.cwd: Union[str, bytes, Path] = cwd
-        self.log = log
-        self.runner = runner
-        self.timeout = timeout
+        self.check: bool = check
+        self.capture_output: bool = capture_output
+        self.cwd: PathLike = cwd
+        self.log: bool = log
+        self.runner: Runnable = runner
+        self.timeout: Optional[float] = timeout
 
     def __call__(
         self,
         *args: str,
-        capture_output=False,
-        check=None,
-        cwd: Union[str, bytes, Path, None] = None,
+        capture_output: bool = False,
+        check: Optional[bool] = None,
+        cwd: Optional[PathLike] = None,
         timeout: Optional[float] = None,
         input: Optional[str] = None,
         **kwargs: Any,
-    ):
+    ) -> "Run":
         if check is None:
             check = self.check
         if timeout is None:
@@ -202,10 +205,10 @@ class Sh:
             self.timeout,
         )
 
-    def __getattr__(self, arg: str):
+    def __getattr__(self, arg: str) -> "Sh":
         return self._with(arg)
 
-    def __getitem__(self, arg: Union[str, Mapping[str, Any]]):
+    def __getitem__(self, arg: Union[str, Mapping[str, Any]]) -> "Sh":
         """Append a name, or a mapping of options, at this position in the command."""
         if isinstance(arg, Mapping):
             return self._with(*make_flags(arg))
@@ -216,7 +219,7 @@ def clone(
     sh: Sh,
     check: Optional[bool] = None,
     capture_output: Optional[bool] = None,
-    cwd: Optional[Union[str, bytes, Path]] = None,
+    cwd: Optional[PathLike] = None,
     log: Optional[bool] = None,
     runner: Optional[Runnable] = None,
     timeout: Optional[float] = None,
@@ -235,40 +238,40 @@ def clone(
 class Run:
     def __init__(
         self,
-        args,
-        check,
-        cwd,
-        capture_output,
+        args: list[str],
+        check: bool,
+        cwd: PathLike,
+        capture_output: bool,
         runner: Runnable,
         timeout: Optional[float] = None,
-    ):
-        self.args = args
-        self.check = check
-        self.cwd = cwd
-        self.capture_output = capture_output
+    ) -> None:
+        self.args: list[str] = args
+        self.check: bool = check
+        self.cwd: PathLike = cwd
+        self.capture_output: bool = capture_output
         self.pipe: Optional[str] = None
         self.completed: Optional[CompletedProcess[str]] = None
         self.runner: Runnable = runner
-        self.timeout = timeout
-        self.command = " ".join(quote(arg) for arg in args)
+        self.timeout: Optional[float] = timeout
+        self.command: str = " ".join(quote(arg) for arg in args)
 
     @property
-    def stdout(self):
+    def stdout(self) -> str:
         completed = self._run()
         return completed.stdout
 
     @property
-    def stderr(self):
+    def stderr(self) -> str:
         completed = self._run()
         return completed.stderr
 
     @property
-    def returncode(self):
+    def returncode(self) -> int:
         completed = self._run()
         return completed.returncode
 
     def check_returncode(
-        self, event: Optional[str] = None, logger: BoundLogger = logger, reraise=True
+        self, event: Optional[str] = None, logger: BoundLogger = logger, reraise: bool = True
     ) -> "Run":
         event = event or self.command
         self.check = False
@@ -276,7 +279,7 @@ class Run:
             self._run()
             assert self.completed is not None
             self.completed.check_returncode()
-        except Exception as e:
+        except Exception:
             logger.warning(
                 event or "Command returned failure",
                 cwd=self.cwd,
@@ -285,13 +288,15 @@ class Run:
                 stderr=self.completed.stderr if self.completed else None,
             )
             if reraise:
-                raise e
+                raise
         return self
 
     def _run(self) -> CompletedProcess[str]:
         if self.completed is None:
             # Only pass a timeout when one is set, so runners that predate it keep working.
-            options = {} if self.timeout is None else {"timeout": self.timeout}
+            options: dict[str, float] = {}
+            if self.timeout is not None:
+                options["timeout"] = self.timeout
             self.completed = self.runner(
                 self.args,
                 capture_output=self.capture_output,
@@ -302,7 +307,7 @@ class Run:
             )
         return self.completed
 
-    def __or__(self, other):
+    def __or__(self, other: "Run") -> "Run":
         self.capture_output = True
         completed = self._run()
         other.pipe = completed.stdout

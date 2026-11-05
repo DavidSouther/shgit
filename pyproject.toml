@@ -20,4 +20,8 @@ classifiers = [
 test = ["pytest"]
 
 [tool.setuptools]
-py-modules = ["shgit", "walk"]
+packages = ["shgit"]
+py-modules = ["walk"]
+
+[tool.setuptools.package-data]
+shgit = ["py.typed"]
