@@ -97,3 +97,21 @@ See [tests/test_shgit.py](./tests/test_shgit.py) for executable examples and tes
 python -m pip install -e '.[test]'
 python -m pytest
 ```
+
+CI runs the tests and builds wheel and source distributions on pushes and pull requests, using Python 3.11 and 3.15. To build locally:
+
+```sh
+python -m build
+```
+
+## Nightly releases
+
+The nightly workflow checks `main` daily at 06:17 UTC and can also be run manually from `main`. It publishes only when the selected commit has no valid release tag, even across month boundaries. Versions use UTC `Year.Month.Increment`: `2026.11.0`, `2026.11.1`, then `2026.12.0`. Months are unpadded, increments start at zero, and each month's next increment follows its greatest existing release tag. Tags use a `v` prefix; malformed tags are ignored.
+
+Release runs are serialized. Tests, wheel/sdist builds, and distribution-version checks must pass before creating the tag and GitHub prerelease with both downloadable assets. Nothing is published to PyPI. Ordinary builds infer a version from Git with setuptools-scm; release builds set `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SHGIT` to the allocated version.
+
+If publication stops after GitHub creates a release, inspect that release before retrying. To repair missing assets, check out its exact commit, rebuild with the same version override, and use `gh release upload v<version> dist/*.whl dist/*.tar.gz --clobber`. If the release remains a draft, finish it with `gh release edit v<version> --draft=false --prerelease --latest=false`. A commit already bearing a valid release tag is skipped by later nightly runs.
+
+## Signed commits
+
+Local development uses Git's SSH commit signing with an existing SSH key. Keep the private key outside the repository, register the public key as a GitHub signing key, and configure `gpg.format=ssh`, `user.signingkey`, and `commit.gpgsign=true`. Local verification also needs `gpg.ssh.allowedSignersFile` containing the author identity and public key; check a signed commit with `git verify-commit HEAD`. Nightly releases create no source commits and need no signing key or signing secret in Actions.

@@ -8,7 +8,7 @@ authors = [
     {name = "David Souther", email = "davidsouther+github@gmail.com"},
 ]
 description = "Fluent Shell & Git python library"
-version = "2024.40.0"
+dynamic = ["version"]
 readme = "README.md"
 dependencies = ["structlog"]
 license = { file = "LICENSE" }
@@ -17,7 +17,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "build", "setuptools", "setuptools-scm"]
 
 [tool.setuptools]
 packages = ["shgit"]
@@ -25,3 +25,5 @@ py-modules = ["walk"]
 
 [tool.setuptools.package-data]
 shgit = ["py.typed"]
+
+[tool.setuptools_scm]
